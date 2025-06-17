@@ -7,7 +7,9 @@ package cmd
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/next/configmgr"
@@ -15,6 +17,7 @@ import (
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/service"
+	"github.com/google/renameio/v2/maybe"
 )
 
 // Main is the entry point of AdGuard Home.
@@ -61,38 +64,59 @@ func Main(embeddedFrontend fs.FS) {
 		FileName:   opts.confFile,
 	}
 
-	confMgr, err := configmgr.New(startCtx, confMgrConf)
+	svc, err := New(ctx, &Config{
+		Logger:      baseLogger.With(slogutil.KeyPrefix, "svc"),
+		ConfMgrConf: confMgrConf,
+	})
 	errors.Check(err)
+	errors.Check(svc.Start(startCtx))
 
-	web := confMgr.Web()
-	err = web.Start(startCtx)
-	errors.Check(err)
+	sigHdlr := service.NewSignalHandler(&service.SignalHandlerConfig{
+		Logger: baseLogger.With(slogutil.KeyPrefix, service.SignalHandlerPrefix),
+	})
 
-	dns := confMgr.DNS()
-	err = dns.Start(startCtx)
-	errors.Check(err)
+	sigHdlr.AddService(svc)
+	sigHdlr.AddRefresher(svc)
 
-	sigHdlr := newSignalHandler(
-		baseLogger.With(slogutil.KeyPrefix, service.SignalHandlerPrefix),
-		confMgrConf,
-		opts.pidFile,
-		web,
-		dns,
-	)
+	if opts.pidFile != "" {
+		writePID(ctx, baseLogger, opts.pidFile)
+		defer removePID(ctx, baseLogger, opts.pidFile)
+	}
 
-	os.Exit(sigHdlr.handle(ctx))
+	os.Exit(sigHdlr.Handle(ctx))
 }
 
 // Default timeouts.
 //
 // TODO(a.garipov):  Make configurable.
 const (
-	defaultTimeoutStart    = 1 * time.Minute
-	defaultTimeoutShutdown = 5 * time.Second
+	defaultTimeoutStart = 1 * time.Minute
 )
 
-// newConfigMgr returns a new configuration manager using defaultTimeout as the
-// context timeout.
-func newConfigMgr(ctx context.Context, c *configmgr.Config) (m *configmgr.Manager, err error) {
-	return configmgr.New(ctx, c)
+// writePID writes the PID to the file.  Any errors are reported to log.
+func writePID(ctx context.Context, l *slog.Logger, pidFile string) {
+	pid := os.Getpid()
+	data := strconv.AppendInt(nil, int64(pid), 10)
+	data = append(data, '\n')
+
+	err := maybe.WriteFile(pidFile, data, 0o644)
+	if err != nil {
+		l.ErrorContext(ctx, "writing pidfile", slogutil.KeyError, err)
+
+		return
+	}
+
+	l.DebugContext(ctx, "wrote pid", "file", pidFile, "pid", pid)
+}
+
+// removePID removes the PID file.  Any errors are reported to log
+func removePID(ctx context.Context, l *slog.Logger, pidFile string) {
+	err := os.Remove(pidFile)
+	if err != nil {
+		l.ErrorContext(ctx, "removing pidfile", slogutil.KeyError, err)
+
+		return
+	}
+
+	l.DebugContext(ctx, "removed pidfile", "file", pidFile)
 }
