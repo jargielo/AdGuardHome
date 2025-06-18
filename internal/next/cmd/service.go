@@ -11,8 +11,8 @@ import (
 	"github.com/AdguardTeam/golibs/service"
 )
 
-// Service manages AdGuard Home services.
-type Service struct {
+// serviceMgr manages AdGuard Home services.
+type serviceMgr struct {
 	confMgr *configmgr.Manager
 	// confMgrMu protects confMgr.
 	confMgrMu *sync.RWMutex
@@ -21,23 +21,23 @@ type Service struct {
 	logger      *slog.Logger
 }
 
-// Config contains configuration parameters.
-type Config struct {
+// serviceMgrConfig contains service manager configuration parameters.
+type serviceMgrConfig struct {
 	// ConfMgrConf is the configuration manager config, it must not be nil.
 	ConfMgrConf *configmgr.Config
 
-	// Logger is the service logger, it must not be nil.
+	// Logger is the logger used to log services activity, it must not be nil.
 	Logger *slog.Logger
 }
 
-// New creates a new *Service.
-func New(ctx context.Context, conf *Config) (s *Service, err error) {
+// newServiceMgr creates a new *serviceMgr.
+func newServiceMgr(ctx context.Context, conf *serviceMgrConfig) (s *serviceMgr, err error) {
 	confMgr, err := configmgr.New(ctx, conf.ConfMgrConf)
 	if err != nil {
 		return nil, fmt.Errorf("creating config manager: %w", err)
 	}
 
-	return &Service{
+	return &serviceMgr{
 		confMgr:     confMgr,
 		confMgrMu:   &sync.RWMutex{},
 		confMgrConf: conf.ConfMgrConf,
@@ -46,10 +46,10 @@ func New(ctx context.Context, conf *Config) (s *Service, err error) {
 }
 
 // type check
-var _ service.Interface = (*Service)(nil)
+var _ service.Interface = (*serviceMgr)(nil)
 
-// Start implements the [service.Interface] interface for *Service.
-func (s *Service) Start(ctx context.Context) (err error) {
+// Start implements the [service.Interface] interface for *serviceMgr.
+func (s *serviceMgr) Start(ctx context.Context) (err error) {
 	var errs []error
 
 	err = s.confMgr.Web().Start(ctx)
@@ -65,8 +65,8 @@ func (s *Service) Start(ctx context.Context) (err error) {
 	return errors.Join(errs...)
 }
 
-// Shutdown implements the [service.Interface] interface for *Service.
-func (s *Service) Shutdown(ctx context.Context) (err error) {
+// Shutdown implements the [service.Interface] interface for *serviceMgr.
+func (s *serviceMgr) Shutdown(ctx context.Context) (err error) {
 	var errs []error
 
 	err = s.confMgr.Web().Shutdown(ctx)
@@ -83,10 +83,10 @@ func (s *Service) Shutdown(ctx context.Context) (err error) {
 }
 
 // type check
-var _ service.Refresher = (*Service)(nil)
+var _ service.Refresher = (*serviceMgr)(nil)
 
-// Refresh implements the [service.Refresher] interface for *Service.
-func (s *Service) Refresh(ctx context.Context) (err error) {
+// Refresh implements the [service.Refresher] interface for *serviceMgr.
+func (s *serviceMgr) Refresh(ctx context.Context) (err error) {
 	s.logger.InfoContext(ctx, "reconfiguring started")
 
 	err = s.Shutdown(ctx)
@@ -117,7 +117,7 @@ func (s *Service) Refresh(ctx context.Context) (err error) {
 }
 
 // updConfMgr updates the configuration manager.
-func (s *Service) updConfMgr(ctx context.Context) (err error) {
+func (s *serviceMgr) updConfMgr(ctx context.Context) (err error) {
 	confMgr, err := configmgr.New(ctx, s.confMgrConf)
 	if err != nil {
 		return fmt.Errorf("creating config manager: %w", err)

@@ -64,7 +64,7 @@ func Main(embeddedFrontend fs.FS) {
 		FileName:   opts.confFile,
 	}
 
-	svc, err := New(ctx, &Config{
+	svc, err := newServiceMgr(ctx, &serviceMgrConfig{
 		Logger:      baseLogger.With(slogutil.KeyPrefix, "svc"),
 		ConfMgrConf: confMgrConf,
 	})
