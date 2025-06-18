@@ -4,21 +4,27 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/next/configmgr"
 	"github.com/AdguardTeam/golibs/errors"
+	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/service"
+	"github.com/google/renameio/v2/maybe"
 )
 
 // serviceMgr manages AdGuard Home services.
 type serviceMgr struct {
 	confMgr *configmgr.Manager
+
 	// confMgrMu protects confMgr.
 	confMgrMu *sync.RWMutex
 
 	confMgrConf *configmgr.Config
 	logger      *slog.Logger
+	pidFile     string
 }
 
 // serviceMgrConfig contains service manager configuration parameters.
@@ -28,6 +34,9 @@ type serviceMgrConfig struct {
 
 	// Logger is the logger used to log services activity, it must not be nil.
 	Logger *slog.Logger
+
+	// PidFile is the path to the file where to store the PID, if any.
+	PidFile string
 }
 
 // newServiceMgr creates a new *serviceMgr.
@@ -42,6 +51,7 @@ func newServiceMgr(ctx context.Context, conf *serviceMgrConfig) (s *serviceMgr, 
 		confMgrMu:   &sync.RWMutex{},
 		confMgrConf: conf.ConfMgrConf,
 		logger:      conf.Logger,
+		pidFile:     conf.PidFile,
 	}, nil
 }
 
@@ -50,6 +60,8 @@ var _ service.Interface = (*serviceMgr)(nil)
 
 // Start implements the [service.Interface] interface for *serviceMgr.
 func (s *serviceMgr) Start(ctx context.Context) (err error) {
+	s.writePID(ctx)
+
 	var errs []error
 
 	err = s.confMgr.Web().Start(ctx)
@@ -78,6 +90,8 @@ func (s *serviceMgr) Shutdown(ctx context.Context) (err error) {
 	if err != nil {
 		errs = append(errs, fmt.Errorf("shutting down dnssvc: %w", err))
 	}
+
+	s.removePID(ctx)
 
 	return errors.Join(errs...)
 }
@@ -129,4 +143,40 @@ func (s *serviceMgr) updConfMgr(ctx context.Context) (err error) {
 	s.confMgr = confMgr
 
 	return nil
+}
+
+// writePID writes the PID to the file.  Any errors are reported to log.
+func (s *serviceMgr) writePID(ctx context.Context) {
+	if s.pidFile == "" {
+		return
+	}
+
+	pid := os.Getpid()
+	data := strconv.AppendInt(nil, int64(pid), 10)
+	data = append(data, '\n')
+
+	err := maybe.WriteFile(s.pidFile, data, 0o644)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "writing pidfile", slogutil.KeyError, err)
+
+		return
+	}
+
+	s.logger.DebugContext(ctx, "wrote pid", "file", s.pidFile, "pid", pid)
+}
+
+// removePID removes the PID file.  Any errors are reported to log
+func (s *serviceMgr) removePID(ctx context.Context) {
+	if s.pidFile == "" {
+		return
+	}
+
+	err := os.Remove(s.pidFile)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "removing pidfile", slogutil.KeyError, err)
+
+		return
+	}
+
+	s.logger.DebugContext(ctx, "removed pidfile", "file", s.pidFile)
 }

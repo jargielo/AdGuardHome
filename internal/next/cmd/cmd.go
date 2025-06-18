@@ -7,9 +7,7 @@ package cmd
 import (
 	"context"
 	"io/fs"
-	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/next/configmgr"
@@ -17,7 +15,6 @@ import (
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/service"
-	"github.com/google/renameio/v2/maybe"
 )
 
 // Main is the entry point of AdGuard Home.
@@ -67,6 +64,7 @@ func Main(embeddedFrontend fs.FS) {
 	svc, err := newServiceMgr(ctx, &serviceMgrConfig{
 		Logger:      baseLogger.With(slogutil.KeyPrefix, "svc"),
 		ConfMgrConf: confMgrConf,
+		PidFile:     opts.pidFile,
 	})
 	errors.Check(err)
 	errors.Check(svc.Start(startCtx))
@@ -78,11 +76,6 @@ func Main(embeddedFrontend fs.FS) {
 	sigHdlr.AddService(svc)
 	sigHdlr.AddRefresher(svc)
 
-	if opts.pidFile != "" {
-		writePID(ctx, baseLogger, opts.pidFile)
-		defer removePID(ctx, baseLogger, opts.pidFile)
-	}
-
 	os.Exit(sigHdlr.Handle(ctx))
 }
 
@@ -92,31 +85,3 @@ func Main(embeddedFrontend fs.FS) {
 const (
 	defaultTimeoutStart = 1 * time.Minute
 )
-
-// writePID writes the PID to the file.  Any errors are reported to log.
-func writePID(ctx context.Context, l *slog.Logger, pidFile string) {
-	pid := os.Getpid()
-	data := strconv.AppendInt(nil, int64(pid), 10)
-	data = append(data, '\n')
-
-	err := maybe.WriteFile(pidFile, data, 0o644)
-	if err != nil {
-		l.ErrorContext(ctx, "writing pidfile", slogutil.KeyError, err)
-
-		return
-	}
-
-	l.DebugContext(ctx, "wrote pid", "file", pidFile, "pid", pid)
-}
-
-// removePID removes the PID file.  Any errors are reported to log
-func removePID(ctx context.Context, l *slog.Logger, pidFile string) {
-	err := os.Remove(pidFile)
-	if err != nil {
-		l.ErrorContext(ctx, "removing pidfile", slogutil.KeyError, err)
-
-		return
-	}
-
-	l.DebugContext(ctx, "removed pidfile", "file", pidFile)
-}
