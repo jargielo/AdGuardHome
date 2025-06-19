@@ -62,11 +62,12 @@ func Main(embeddedFrontend fs.FS) {
 	}
 
 	svc, err := newServiceMgr(ctx, &serviceMgrConfig{
-		Logger:      baseLogger.With(slogutil.KeyPrefix, "svc"),
-		ConfMgrConf: confMgrConf,
-		PidFile:     opts.pidFile,
+		confMgrConf: confMgrConf,
+		logger:      baseLogger.With(slogutil.KeyPrefix, "svc"),
+		pidFilePath: opts.pidFile,
 	})
 	errors.Check(err)
+
 	errors.Check(svc.Start(startCtx))
 
 	sigHdlr := service.NewSignalHandler(&service.SignalHandlerConfig{
